@@ -1,37 +1,49 @@
 msgid ""
-msgstr "Content-Type: text/plain; charset=UTF-8"
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"PO-Revision-Date: 2025-11-24 10:29+0000\n"
+"Last-Translator: CRISTIAN ANDREI <cristianvdr@gmail.com>\n"
+"Language-Team: Romanian <https://hosted.weblate.org/projects/openwrt/"
+"luciapplicationsxfrpc/ro/>\n"
+"Language: ro\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=n==1 ? 0 : "
+"(n==0 || (n%100 > 0 && n%100 < 20)) ? 1 : 2;\n"
+"X-Generator: Weblate 5.15-dev\n"
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:104
 msgid "Alert"
-msgstr ""
+msgstr "Alertă"
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:82
 msgid "By default, this value is \"\"."
-msgstr ""
+msgstr "În mod implicit, această valoare este \"\"."
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:71
 msgid "By default, this value is \"0.0.0.0\"."
-msgstr ""
+msgstr "Implicit, această valoare este \"0.0.0.0\"."
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:97
 msgid "By default, this value is \"Info\"."
-msgstr ""
+msgstr "Implicit, această valoare este \"Info\"."
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:129
 msgid "By default, this value is \"tcp\"."
-msgstr ""
+msgstr "Implicit, această valoare este \"tcp\"."
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:76
 msgid "By default, this value is 7000."
-msgstr ""
+msgstr "Implicit, această valoare este 7000."
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:58
 msgid "Collecting data ..."
-msgstr ""
+msgstr "Colectare date ..."
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:66
 msgid "Common Settings"
-msgstr ""
+msgstr "Setări Comune"
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:103
 msgid "Critical"
@@ -43,7 +55,7 @@ msgstr ""
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:98
 msgid "Debug"
-msgstr ""
+msgstr "Depanare"
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:90
 msgid "Disabled xfrpc service"
@@ -55,11 +67,11 @@ msgstr ""
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:102
 msgid "Error"
-msgstr ""
+msgstr "Eroare"
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:120
 msgid "General Settings"
-msgstr ""
+msgstr "Setări Generale"
 
 #: applications/luci-app-xfrpc/root/usr/share/rpcd/acl.d/luci-app-xfrpc.json:3
 msgid "Grant access to LuCI app xfrpc"
@@ -97,7 +109,7 @@ msgstr ""
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:94
 msgid "Log level"
-msgstr ""
+msgstr "Nivel de jurnal"
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:95
 msgid ""
@@ -116,7 +128,7 @@ msgstr ""
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:100
 msgid "Notice"
-msgstr ""
+msgstr "Remarcă"
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:107
 msgid "Proxy Settings"
@@ -135,7 +147,7 @@ msgstr ""
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:30
 msgid "RUNNING"
-msgstr ""
+msgstr "Funcţionare"
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:146
 msgid "Remote port"
@@ -183,7 +195,7 @@ msgstr ""
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:101
 msgid "Warning"
-msgstr ""
+msgstr "Atenționare"
 
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:30
 #: applications/luci-app-xfrpc/htdocs/luci-static/resources/view/xfrpc.js:32

@@ -1,7 +1,6 @@
 {
 	"admin/services/xfrpc": {
-		"title": "xfrpc",
-		"order": 2,
+		"title": "Reverse proxy",
 		"action": {
 			"type": "view",
 			"path": "xfrpc"

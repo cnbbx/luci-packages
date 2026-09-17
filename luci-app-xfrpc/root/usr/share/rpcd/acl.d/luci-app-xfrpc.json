@@ -3,8 +3,7 @@
 		"description": "Grant access to LuCI app xfrpc",
 		"read": {
 			"ubus": {
-				"service": [ "list" ],
-				"luci": [ "callInstaLoader" ]
+				"service": [ "list" ]
 			},
 			"uci": ["xfrpc"]
 		},

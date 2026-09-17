@@ -1,6 +1,4 @@
 
-![xfrpc](https://user-images.githubusercontent.com/1182593/213063003-73501d3b-1a22-4f4a-8f3f-4ca3268b5bee.png)
-
 
 ## What is xfrpc 
 
@@ -36,11 +34,6 @@ the following table is detail  compatible feature (vs official frpc / frp v0.71)
 
 
 
-## Architecture
-
-
-![Architecture](https://user-images.githubusercontent.com/1182593/196329678-1781b4e9-2355-4863-be3f-e128b31cc82c.png)
-
 
 ## How to build
 
@@ -62,9 +55,6 @@ wolfSSL is the default TLS library on OpenWrt and is recommended. No additional 
 **Build:**
 
 ```
-git clone https://github.com/liudf0716/xfrpc.git
-cd xfrpc
-mkdir build && cd build
 cmake ..
 make
 ```
@@ -393,35 +383,3 @@ luci-app-xfrpc can be installed via the opkg package manager on OpenWRT and prov
 ## How to contribute our project
 
 See [CONTRIBUTING](https://github.com/liudf0716/xfrpc/blob/master/CONTRIBUTING.md) for details on submitting patches and the contribution workflow.
-
-## Contact
-
-QQ群 ： [331230369](https://jq.qq.com/?_wv=1027&k=47QGEhL)
-
-
-## Please support us and star our project
-
-[![Star History Chart](https://star-history.dera.page/svg?repos=liudf0716/xfrpc&type=Date)](https://star-history.dera.page/#liudf0716/xfrpc&Date)
-
-## 打赏
-
-支付宝打赏
-
-![支付宝打赏](https://user-images.githubusercontent.com/1182593/169465135-d4522479-4068-4714-ab58-987d7d7eb338.png)
-
-
-微信打赏
-
-
-![微信打赏](https://user-images.githubusercontent.com/1182593/169465249-db1b495e-078e-4cab-91fc-96dab3320b06.png)
-
-
- <!--
- 
-## 广告
-
-想学习OpenWrt开发，但是摸不着门道？自学没毅力？基础太差？怕太难学不会？跟着佐大学OpenWrt开发入门培训班助你能学有所成
-
-报名地址：https://forgotfun.org/2018/04/openwrt-training-2018.html
-
--->
