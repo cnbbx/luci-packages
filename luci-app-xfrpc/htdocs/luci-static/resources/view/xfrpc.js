@@ -81,28 +81,21 @@ return view.extend({
 			sent to the server. The server must have a matching token for authorization to succeed.'), 
 			_('By default, this value is "".')));
 
-		o = s.taboption('init', form.SectionValue, 'init', form.TypedSection, 
-			'xfrp', _('Startup Settings'));
-		s = o.subsection;
-		s.anonymous = true;
-		s.dynamic = true;
+		o = s.taboption('init', form.Flag, 'disabled', _('Disable xfrpc service'),
+			_('Check this to prevent xfrpc from starting.'));
+		o.default = '0';
 
-		o = s.option(form.Flag, 'disabled', _('Disabled xfrpc service'));
-		o.datatype = 'bool';
-		o.optional = true;
-
-		o = s.option(form.ListValue, 'loglevel', _('Log level'), 
-			'%s <br /> %s'.format(_('LogLevel specifies the minimum log level. Valid values are "Debug", "Info", \
-			"Notice", "Warning", "Error", "Critical", "Alert" and "Emergency".'),
-			_('By default, this value is "Info".')));
-		o.value(8, _('Debug'))
-		o.value(7, _('Info'))
-		o.value(6, _('Notice'))
-		o.value(5, _('Warning'))
-		o.value(4, _('Error'))
-		o.value(3, _('Critical'))
-		o.value(2, _('Alert'))
-		o.value(1, _('Emergency'))
+		o = s.taboption('init', form.ListValue, 'loglevel', _('Log level'),
+			_('Specifies the minimum log level. By default, this value is "Info".'));
+		o.value(8, _('Debug'));
+		o.value(7, _('Info'));
+		o.value(6, _('Notice'));
+		o.value(5, _('Warning'));
+		o.value(4, _('Error'));
+		o.value(3, _('Critical'));
+		o.value(2, _('Alert'));
+		o.value(1, _('Emergency'));
+		o.default = '7';
 
 		s = m.section(form.GridSection, 'xfrpc', _('Proxy Settings'));
 		s.addremove = true;
