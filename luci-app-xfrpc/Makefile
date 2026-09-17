@@ -8,6 +8,6 @@ LUCI_DEPENDS:=+luci-base +xfrpc
 PKG_LICENSE:=Apache-2.0
 PKG_MAINTAINER:=Dengfeng Liu <liu_df@qq.com>
 
-include $(TOPDIR)/feeds/luci/luci.mk
+include ../../luci.mk
 
 # call BuildPackage - OpenWrt buildroot signature

@@ -1,6 +1,0 @@
-config xfrpc 'common'
-	option server_addr '0.0.0.0'
-	option server_port '7000'
-	option token ''
-	option disabled '0'
-	option loglevel '7'

@@ -1,0 +1,585 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2022 Dengfeng Liu <liudf0716@gmail.com>
+#
+# This is free software, licensed under the GNU General Public License v3.
+# See /LICENSE for more information.
+#
+
+START=99
+USE_PROCD=1
+
+NAME=xfrpc
+PROG=/usr/bin/$NAME
+
+
+# Helper: append a TOML key=value string pair to the config file.
+toml_kv() {
+	[ -n "$2" ] && echo "$1 = \"$2\"" >> "$3"
+}
+
+# Helper: append a TOML integer key=value pair.
+toml_kv_int() {
+	[ -n "$2" ] && echo "$1 = $2" >> "$3"
+}
+
+handle_xfrpc() {
+	local section="$1"
+	local config="$2"
+
+	local server_addr=$(uci get xfrpc.${section}.server_addr 2>/dev/null)
+	local server_port=$(uci get xfrpc.${section}.server_port 2>/dev/null)
+	local token=$(uci get xfrpc.${section}.token 2>/dev/null)
+	local tcp_mux=$(uci get xfrpc.${section}.tcp_mux 2>/dev/null)
+	local protocol=$(uci get xfrpc.${section}.protocol 2>/dev/null)
+	local quic_bind_port=$(uci get xfrpc.${section}.quic_bind_port 2>/dev/null)
+	local heartbeat_interval=$(uci get xfrpc.${section}.heartbeat_interval 2>/dev/null)
+	local heartbeat_timeout=$(uci get xfrpc.${section}.heartbeat_timeout 2>/dev/null)
+	local tls_enable=$(uci get xfrpc.${section}.tls_enable 2>/dev/null)
+	local tls_cert_file=$(uci get xfrpc.${section}.tls_cert_file 2>/dev/null)
+	local tls_key_file=$(uci get xfrpc.${section}.tls_key_file 2>/dev/null)
+	local tls_trusted_ca_file=$(uci get xfrpc.${section}.tls_trusted_ca_file 2>/dev/null)
+	local tls_server_name=$(uci get xfrpc.${section}.tls_server_name 2>/dev/null)
+
+	# OIDC settings
+	local auth_method=$(uci get xfrpc.${section}.auth_method 2>/dev/null)
+	local oidc_client_id=$(uci get xfrpc.${section}.oidc_client_id 2>/dev/null)
+	local oidc_client_secret=$(uci get xfrpc.${section}.oidc_client_secret 2>/dev/null)
+	local oidc_audience=$(uci get xfrpc.${section}.oidc_audience 2>/dev/null)
+	local oidc_scope=$(uci get xfrpc.${section}.oidc_scope 2>/dev/null)
+	local oidc_token_endpoint_url=$(uci get xfrpc.${section}.oidc_token_endpoint_url 2>/dev/null)
+	local oidc_trusted_ca_file=$(uci get xfrpc.${section}.oidc_trusted_ca_file 2>/dev/null)
+	local oidc_insecure_skip_verify=$(uci get xfrpc.${section}.oidc_insecure_skip_verify 2>/dev/null)
+
+	# Warn if TLS enabled but client cert/key missing
+	if [ -n "$tls_enable" ] && [ "$tls_enable" != "0" ]; then
+		if [ -z "$tls_cert_file" ] || [ -z "$tls_key_file" ]; then
+			logger -t xfrpc "WARN: tls_enable=1 but tls_cert_file/tls_key_file not set"
+		elif [ ! -f "$tls_cert_file" ] || [ ! -f "$tls_key_file" ]; then
+			logger -t xfrpc "WARN: TLS cert/key file not found: $tls_cert_file / $tls_key_file"
+		fi
+	fi
+
+	# Write TOML top-level keys
+	toml_kv "serverAddr" "$server_addr" "$config"
+	toml_kv_int "serverPort" "$server_port" "$config"
+
+	# Auth
+	if [ "$auth_method" = "oidc" ]; then
+		echo "auth.method = \"oidc\"" >> "$config"
+		toml_kv "auth.oidc.clientID" "$oidc_client_id" "$config"
+		toml_kv "auth.oidc.clientSecret" "$oidc_client_secret" "$config"
+		toml_kv "auth.oidc.audience" "$oidc_audience" "$config"
+		toml_kv "auth.oidc.scope" "$oidc_scope" "$config"
+		toml_kv "auth.oidc.tokenEndpointURL" "$oidc_token_endpoint_url" "$config"
+		toml_kv "auth.oidc.trustedCaFile" "$oidc_trusted_ca_file" "$config"
+		[ "$oidc_insecure_skip_verify" = "1" ] && echo "auth.oidc.insecureSkipVerify = true" >> "$config"
+	elif [ -n "$token" ]; then
+		echo "auth.method = \"token\"" >> "$config"
+		echo "auth.token = \"$token\"" >> "$config"
+	fi
+
+	# Transport
+	toml_kv "transport.protocol" "$protocol" "$config"
+	[ -n "$tcp_mux" ] && [ "$tcp_mux" != "0" ] && echo "transport.tcpMux = true" >> "$config"
+	toml_kv_int "transport.heartbeatInterval" "$heartbeat_interval" "$config"
+	toml_kv_int "transport.heartbeatTimeout" "$heartbeat_timeout" "$config"
+
+	# TLS
+	if [ -n "$tls_enable" ] && [ "$tls_enable" != "0" ]; then
+		echo "transport.tls.enable = true" >> "$config"
+		toml_kv "transport.tls.certFile" "$tls_cert_file" "$config"
+		toml_kv "transport.tls.keyFile" "$tls_key_file" "$config"
+		toml_kv "transport.tls.trustedCaFile" "$tls_trusted_ca_file" "$config"
+		toml_kv "transport.tls.serverName" "$tls_server_name" "$config"
+	fi
+
+	# QUIC
+	toml_kv_int "quicBindPort" "$quic_bind_port" "$config"
+}
+
+handle_tcp() {
+	local section="$1"
+	local config="$2"
+
+	uci_validate_section xfrpc tcp $section \
+		'enabled:bool:1' \
+		'service_type:string' \
+		'local_ip:host' \
+		'local_port:uinteger' \
+		'remote_port:uinteger' \
+		'use_encryption:bool:0' \
+		'use_compression:bool:0' \
+		'health_check_type:string' \
+		'health_check_url:string' \
+		'health_check_interval:uinteger' \
+		'health_check_timeout:uinteger' \
+		'health_check_max_failed:uinteger' \
+		'start_time:string' \
+		'end_time:string'
+	
+	[ $enabled = 0 ] && return
+
+	# Validate service_type if provided
+	if [ -n "$service_type" ]; then
+		case "$service_type" in
+			ssh|mstsc|rdp|vnc|telnet) ;;
+			*)
+				echo "Error: Invalid service_type '$service_type'. Must be one of: ssh, mstsc, rdp, vnc, telnet"
+				return 1
+				;;
+		esac
+	fi
+
+	echo "[[proxies]]" >> "$config"
+	echo "name = \"$section\"" >> "$config"
+	echo "type = \"tcp\"" >> "$config"
+	toml_kv "localIP" "$local_ip" "$config"
+	toml_kv_int "localPort" "$local_port" "$config"
+	toml_kv_int "remotePort" "$remote_port" "$config"
+	toml_kv "serviceType" "$service_type" "$config"
+	[ "$use_encryption" = "1" ] && echo "transport.useEncryption = true" >> "$config"
+	[ "$use_compression" = "1" ] && echo "transport.useCompression = true" >> "$config"
+
+	# Health check
+	[ -n "$health_check_type" ] && {
+		echo "healthCheck.type = \"$health_check_type\"" >> "$config"
+		toml_kv "healthCheck.path" "$health_check_url" "$config"
+		toml_kv_int "healthCheck.intervalSeconds" "$health_check_interval" "$config"
+		toml_kv_int "healthCheck.timeoutSeconds" "$health_check_timeout" "$config"
+		toml_kv_int "healthCheck.maxFailed" "$health_check_max_failed" "$config"
+	}
+
+	# Time-based proxy management (xfrpc unique)
+	toml_kv_int "startTime" "$start_time" "$config"
+	toml_kv_int "endTime" "$end_time" "$config"
+}
+
+handle_http() {
+	local section="$1"
+	local config="$2"
+
+	uci_validate_section xfrpc http $section \
+		'enabled:bool:1' \
+		'local_ip:host' \
+		'local_port:uinteger' \
+		'custom_domains:string' \
+		'subdomain:string' \
+		'locations:string' \
+		'host_header_rewrite:string' \
+		'http_user:string' \
+		'http_password:string' \
+		'request_headers:string' \
+		'response_headers:string' \
+		'use_encryption:bool:0' \
+		'use_compression:bool:0' \
+		'start_time:string' \
+		'end_time:string'
+
+	[ $enabled = 0 ] && return
+
+	echo "[[proxies]]" >> "$config"
+	echo "name = \"$section\"" >> "$config"
+	echo "type = \"http\"" >> "$config"
+	toml_kv "localIP" "$local_ip" "$config"
+	toml_kv_int "localPort" "$local_port" "$config"
+	if [ -n "$custom_domains" ]; then
+		local arr=""
+		for d in $custom_domains; do
+			[ -n "$arr" ] && arr="$arr, "
+			arr="$arr\"$d\""
+		done
+		echo "customDomains = [$arr]" >> "$config"
+	fi
+	toml_kv "subdomain" "$subdomain" "$config"
+	toml_kv "locations" "$locations" "$config"
+	toml_kv "hostHeaderRewrite" "$host_header_rewrite" "$config"
+	toml_kv "httpUser" "$http_user" "$config"
+	toml_kv "httpPassword" "$http_password" "$config"
+
+	# HTTP headers: UCI format "key1=val1,key2=val2" → TOML requestHeaders.set.key = "val"
+	if [ -n "$request_headers" ]; then
+		echo "[proxies.requestHeaders.set]" >> "$config"
+		echo "$request_headers" | tr ',' '\n' | while IFS='=' read -r key val; do
+			[ -n "$key" ] && echo "$key = \"$val\"" >> "$config"
+		done
+	fi
+	if [ -n "$response_headers" ]; then
+		echo "[proxies.responseHeaders.set]" >> "$config"
+		echo "$response_headers" | tr ',' '\n' | while IFS='=' read -r key val; do
+			[ -n "$key" ] && echo "$key = \"$val\"" >> "$config"
+		done
+	fi
+
+	[ "$use_encryption" = "1" ] && echo "transport.useEncryption = true" >> "$config"
+	[ "$use_compression" = "1" ] && echo "transport.useCompression = true" >> "$config"
+
+	# Time-based proxy management (xfrpc unique)
+	toml_kv_int "startTime" "$start_time" "$config"
+	toml_kv_int "endTime" "$end_time" "$config"
+}
+
+handle_https() {
+	local section="$1"
+	local config="$2"
+
+	uci_validate_section xfrpc https $section \
+		'enabled:bool:1' \
+		'local_ip:host' \
+		'local_port:uinteger' \
+		'custom_domains:string' \
+		'subdomain:string' \
+		'locations:string' \
+		'host_header_rewrite:string' \
+		'http_user:string' \
+		'http_password:string' \
+		'request_headers:string' \
+		'response_headers:string' \
+		'use_encryption:bool:0' \
+		'use_compression:bool:0' \
+		'start_time:string' \
+		'end_time:string'
+	
+	[ $enabled = 0 ] && return
+
+	echo "[[proxies]]" >> "$config"
+	echo "name = \"$section\"" >> "$config"
+	echo "type = \"https\"" >> "$config"
+	toml_kv "localIP" "$local_ip" "$config"
+	toml_kv_int "localPort" "$local_port" "$config"
+	if [ -n "$custom_domains" ]; then
+		local arr=""
+		for d in $custom_domains; do
+			[ -n "$arr" ] && arr="$arr, "
+			arr="$arr\"$d\""
+		done
+		echo "customDomains = [$arr]" >> "$config"
+	fi
+	toml_kv "subdomain" "$subdomain" "$config"
+	toml_kv "locations" "$locations" "$config"
+	toml_kv "hostHeaderRewrite" "$host_header_rewrite" "$config"
+	toml_kv "httpUser" "$http_user" "$config"
+	toml_kv "httpPassword" "$http_password" "$config"
+
+	# HTTP headers
+	if [ -n "$request_headers" ]; then
+		echo "[proxies.requestHeaders.set]" >> "$config"
+		echo "$request_headers" | tr ',' '\n' | while IFS='=' read -r key val; do
+			[ -n "$key" ] && echo "$key = \"$val\"" >> "$config"
+		done
+	fi
+	if [ -n "$response_headers" ]; then
+		echo "[proxies.responseHeaders.set]" >> "$config"
+		echo "$response_headers" | tr ',' '\n' | while IFS='=' read -r key val; do
+			[ -n "$key" ] && echo "$key = \"$val\"" >> "$config"
+		done
+	fi
+
+	[ "$use_encryption" = "1" ] && echo "transport.useEncryption = true" >> "$config"
+	[ "$use_compression" = "1" ] && echo "transport.useCompression = true" >> "$config"
+
+	# Time-based proxy management (xfrpc unique)
+	toml_kv_int "startTime" "$start_time" "$config"
+	toml_kv_int "endTime" "$end_time" "$config"
+}
+
+handle_socks5() {
+	local section="$1"
+	local config="$2"
+
+	uci_validate_section xfrpc socks5 $section \
+		'enabled:bool:1' \
+		'remote_port:uinteger' \
+		'start_time:string' \
+		'end_time:string'
+
+	[ $enabled = 0 ] && return
+
+	echo "[[proxies]]" >> "$config"
+	echo "name = \"$section\"" >> "$config"
+	echo "type = \"socks5\"" >> "$config"
+	toml_kv_int "remotePort" "$remote_port" "$config"
+	toml_kv_int "startTime" "$start_time" "$config"
+	toml_kv_int "endTime" "$end_time" "$config"
+}
+
+handle_tcpmux() {
+	local section="$1"
+	local config="$2"
+
+	uci_validate_section xfrpc tcpmux $section \
+		'enabled:bool:1' \
+		'local_ip:host' \
+		'local_port:uinteger' \
+		'remote_port:uinteger' \
+		'custom_domains:string' \
+		'multiplexer:string' \
+		'service_type:string' \
+		'use_encryption:bool:0' \
+		'use_compression:bool:0' \
+		'start_time:string' \
+		'end_time:string'
+
+	[ $enabled = 0 ] && return
+
+	# Validate service_type if provided
+	if [ -n "$service_type" ]; then
+		case "$service_type" in
+			ssh|mstsc|rdp|vnc|telnet|http|https) ;;
+			*)
+				echo "Error: Invalid service_type '$service_type'. Must be one of: ssh, mstsc, rdp, vnc, telnet, http, https"
+				return 1
+				;;
+		esac
+	fi
+
+	# Validate multiplexer type if provided
+	if [ -n "$multiplexer" ]; then
+		case "$multiplexer" in
+			httpconnect|socks5|raw|quic) ;;
+			*)
+				echo "Error: Invalid multiplexer '$multiplexer'. Must be one of: httpconnect, socks5, raw, quic"
+				return 1
+				;;
+		esac
+	fi
+
+	echo "[[proxies]]" >> "$config"
+	echo "name = \"$section\"" >> "$config"
+	echo "type = \"tcpmux\"" >> "$config"
+	toml_kv "localIP" "$local_ip" "$config"
+	toml_kv_int "localPort" "$local_port" "$config"
+	toml_kv_int "remotePort" "$remote_port" "$config"
+	toml_kv "serviceType" "$service_type" "$config"
+	toml_kv "multiplexer" "$multiplexer" "$config"
+	[ "$use_encryption" = "1" ] && echo "transport.useEncryption = true" >> "$config"
+	[ "$use_compression" = "1" ] && echo "transport.useCompression = true" >> "$config"
+	if [ -n "$custom_domains" ]; then
+		local arr=""
+		for d in $custom_domains; do
+			[ -n "$arr" ] && arr="$arr, "
+			arr="$arr\"$d\""
+		done
+		echo "customDomains = [$arr]" >> "$config"
+	fi
+	# Time-based proxy management (xfrpc unique)
+	toml_kv_int "startTime" "$start_time" "$config"
+	toml_kv_int "endTime" "$end_time" "$config"
+}
+
+handle_stcp() {
+	local section="$1"
+	local config="$2"
+
+	uci_validate_section xfrpc stcp $section \
+		'enabled:bool:1' \
+		'local_ip:host' \
+		'local_port:uinteger' \
+		'remote_port:uinteger' \
+		'secret_key:string' \
+		'allow_users:string' \
+		'use_encryption:bool:0' \
+		'use_compression:bool:0' \
+		'start_time:string' \
+		'end_time:string'
+
+	[ $enabled = 0 ] && return
+
+	echo "[[proxies]]" >> "$config"
+	echo "name = \"$section\"" >> "$config"
+	echo "type = \"stcp\"" >> "$config"
+	toml_kv "localIP" "$local_ip" "$config"
+	toml_kv_int "localPort" "$local_port" "$config"
+	toml_kv "secretKey" "$secret_key" "$config"
+	toml_kv "allowUsers" "$allow_users" "$config"
+	[ "$use_encryption" = "1" ] && echo "transport.useEncryption = true" >> "$config"
+	[ "$use_compression" = "1" ] && echo "transport.useCompression = true" >> "$config"
+	toml_kv_int "startTime" "$start_time" "$config"
+	toml_kv_int "endTime" "$end_time" "$config"
+}
+
+handle_xtcp() {
+	local section="$1"
+	local config="$2"
+
+	uci_validate_section xfrpc xtcp $section \
+		'enabled:bool:1' \
+		'local_ip:host' \
+		'local_port:uinteger' \
+		'remote_port:uinteger' \
+		'secret_key:string' \
+		'allow_users:string' \
+		'use_encryption:bool:0' \
+		'use_compression:bool:0' \
+		'start_time:string' \
+		'end_time:string'
+
+	[ $enabled = 0 ] && return
+
+	echo "[[proxies]]" >> "$config"
+	echo "name = \"$section\"" >> "$config"
+	echo "type = \"xtcp\"" >> "$config"
+	toml_kv "localIP" "$local_ip" "$config"
+	toml_kv_int "localPort" "$local_port" "$config"
+	toml_kv "secretKey" "$secret_key" "$config"
+	toml_kv "allowUsers" "$allow_users" "$config"
+	[ "$use_encryption" = "1" ] && echo "transport.useEncryption = true" >> "$config"
+	[ "$use_compression" = "1" ] && echo "transport.useCompression = true" >> "$config"
+	toml_kv_int "startTime" "$start_time" "$config"
+	toml_kv_int "endTime" "$end_time" "$config"
+}
+
+handle_sudp() {
+	local section="$1"
+	local config="$2"
+
+	uci_validate_section xfrpc sudp $section \
+		'enabled:bool:1' \
+		'local_ip:host' \
+		'local_port:uinteger' \
+		'remote_port:uinteger' \
+		'secret_key:string' \
+		'use_encryption:bool:0' \
+		'use_compression:bool:0' \
+		'start_time:string' \
+		'end_time:string'
+
+	[ $enabled = 0 ] && return
+
+	echo "[[proxies]]" >> "$config"
+	echo "name = \"$section\"" >> "$config"
+	echo "type = \"sudp\"" >> "$config"
+	toml_kv "localIP" "$local_ip" "$config"
+	toml_kv_int "localPort" "$local_port" "$config"
+	toml_kv "secretKey" "$secret_key" "$config"
+	[ "$use_encryption" = "1" ] && echo "transport.useEncryption = true" >> "$config"
+	[ "$use_compression" = "1" ] && echo "transport.useCompression = true" >> "$config"
+	toml_kv_int "startTime" "$start_time" "$config"
+	toml_kv_int "endTime" "$end_time" "$config"
+}
+
+handle_stcp_visitor() {
+	local section="$1"
+	local config="$2"
+
+	uci_validate_section xfrpc stcp_visitor $section \
+		'enabled:bool:1' \
+		'server_name:string' \
+		'bind_addr:string' \
+		'bind_port:uinteger' \
+		'secret_key:string' \
+		'fallback_to:string' \
+		'use_encryption:bool:0' \
+		'use_compression:bool:0'
+
+	[ $enabled = 0 ] && return
+
+	echo "[[visitors]]" >> "$config"
+	echo "name = \"$section\"" >> "$config"
+	echo "type = \"stcp\"" >> "$config"
+	toml_kv "serverName" "$server_name" "$config"
+	toml_kv "bindAddr" "$bind_addr" "$config"
+	toml_kv_int "bindPort" "$bind_port" "$config"
+	toml_kv "secretKey" "$secret_key" "$config"
+	toml_kv "fallbackTo" "$fallback_to" "$config"
+	[ "$use_encryption" = "1" ] && echo "transport.useEncryption = true" >> "$config"
+	[ "$use_compression" = "1" ] && echo "transport.useCompression = true" >> "$config"
+}
+
+handle_xtcp_visitor() {
+	local section="$1"
+	local config="$2"
+
+	uci_validate_section xfrpc xtcp_visitor $section \
+		'enabled:bool:1' \
+		'server_name:string' \
+		'bind_addr:string' \
+		'bind_port:uinteger' \
+		'secret_key:string' \
+		'fallback_to:string' \
+		'use_encryption:bool:0' \
+		'use_compression:bool:0'
+
+	[ $enabled = 0 ] && return
+
+	echo "[[visitors]]" >> "$config"
+	echo "name = \"$section\"" >> "$config"
+	echo "type = \"xtcp\"" >> "$config"
+	toml_kv "serverName" "$server_name" "$config"
+	toml_kv "bindAddr" "$bind_addr" "$config"
+	toml_kv_int "bindPort" "$bind_port" "$config"
+	toml_kv "secretKey" "$secret_key" "$config"
+	toml_kv "fallbackTo" "$fallback_to" "$config"
+	[ "$use_encryption" = "1" ] && echo "transport.useEncryption = true" >> "$config"
+	[ "$use_compression" = "1" ] && echo "transport.useCompression = true" >> "$config"
+}
+
+handle_plugin() {
+	local section="$1"
+	local config="$2"
+
+	uci_validate_section xfrpc plugin $section \
+		'enabled:bool:1' \
+		'remote_port:uinteger' \
+		'plugin_name:string' \
+		'plugin_user:string' \
+		'plugin_pwd:string' \
+		'plugin_unix_path:string'
+
+	[ $enabled = 0 ] && return
+
+	echo "[[proxies]]" >> "$config"
+	echo "name = \"$section\"" >> "$config"
+	echo "type = \"tcp\"" >> "$config"
+	toml_kv_int "remotePort" "$remote_port" "$config"
+	[ -n "$plugin_name" ] && {
+		echo "plugin.type = \"$plugin_name\"" >> "$config"
+		toml_kv "plugin.httpUser" "$plugin_user" "$config"
+		toml_kv "plugin.httpPassword" "$plugin_pwd" "$config"
+		toml_kv "plugin.unixPath" "$plugin_unix_path" "$config"
+	}
+}
+
+service_triggers() {
+	procd_add_reload_trigger "$NAME"
+	procd_add_interface_trigger "interface.*.up" wan /etc/init.d/xfrpc restart
+}
+
+start_service() {
+	local conf_file="/var/etc/$NAME.toml"
+
+	> "$conf_file"
+	config_load "$NAME"
+
+	local enabled=$(uci get xfrpc.common.enabled 2>/dev/null)
+	local loglevel=$(uci get xfrpc.common.loglevel 2>/dev/null)
+	[ -z "$loglevel" ] && loglevel=0
+
+	if [ "$enabled" = "0" ] || [ "$enabled" = "false" ]; then
+		echo "xfrpc service disabled"
+		return
+	fi
+
+	config_foreach handle_xfrpc xfrpc "$conf_file"
+	config_foreach handle_tcp tcp "$conf_file"
+	config_foreach handle_http http "$conf_file"
+	config_foreach handle_https https "$conf_file"
+	config_foreach handle_socks5 socks5 "$conf_file"
+	config_foreach handle_tcpmux tcpmux "$conf_file"
+	config_foreach handle_stcp stcp "$conf_file"
+	config_foreach handle_xtcp xtcp "$conf_file"
+	config_foreach handle_sudp sudp "$conf_file"
+	config_foreach handle_stcp_visitor stcp_visitor "$conf_file"
+	config_foreach handle_xtcp_visitor xtcp_visitor "$conf_file"
+	config_foreach handle_plugin plugin "$conf_file"
+
+	procd_open_instance
+	procd_set_param command "$PROG" -c "$conf_file" -s -f -d $loglevel
+	procd_set_param file "$conf_file"
+	procd_set_param respawn
+	procd_close_instance
+}
+
+reload_service() {
+	stop
+	start
+}
