@@ -1,0 +1,229 @@
+// SPDX-License-Identifier: GPL-3.0-only
+/*
+ * Copyright (c) 2026 Dengfeng Liu <liudf0716@gmail.com>
+ *
+ * Stream encryption (AES-128-CFB) and compression (Snappy) for proxy data.
+ *
+ * Encryption: AES-128-CFB stream cipher (compatible with frp use_encryption)
+ *   Key derivation: PBKDF2(token, salt="frp", iter=64, keylen=16, SHA1)
+ *   golib default salt is "crypto", but frps/frpc init() set
+ *   crypto.DefaultSalt = "frp". Proxy data streams must use "frp".
+ *   IV: 16 random bytes, prepended to first write
+ *
+ * Compression: Google Snappy (compatible with frp use_compression)
+ *   Uses vendored snappy-c (Linux kernel version)
+ */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+
+#include <openssl/evp.h>
+#include <openssl/rand.h>
+#include "vendor/snappy/snappy.h"
+
+#include "crypto_stream.h"
+#include "debug.h"
+
+#define AES_BLOCK_SIZE 16
+#define PBKDF2_ITERATIONS 64
+#define PBKDF2_SALT "frp"
+
+/* ---- Encryption context ---- */
+
+struct crypto_ctx {
+	EVP_CIPHER_CTX *cipher_ctx;
+	uint8_t key[AES_BLOCK_SIZE];
+	uint8_t iv[AES_BLOCK_SIZE];
+	int iv_sent;     /* for writer: has IV been prepended? */
+	int iv_received; /* for reader: has IV been read? */
+	int is_writer;
+};
+
+int crypto_derive_key(const char *token, uint8_t *out_key)
+{
+	if (!token || !out_key)
+		return -1;
+
+	/* PBKDF2(token, salt="frp", iter=64, keylen=16, SHA1) */
+	if (PKCS5_PBKDF2_HMAC(token, strlen(token),
+	                       (const unsigned char *)PBKDF2_SALT, strlen(PBKDF2_SALT),
+	                       PBKDF2_ITERATIONS, EVP_sha1(),
+	                       AES_BLOCK_SIZE, out_key) != 1) {
+		debug(LOG_ERR, "PBKDF2 key derivation failed");
+		return -1;
+	}
+	return 0;
+}
+
+struct crypto_ctx *crypto_ctx_new_writer(const uint8_t *key)
+{
+	struct crypto_ctx *ctx = calloc(1, sizeof(struct crypto_ctx));
+	if (!ctx) return NULL;
+
+	ctx->cipher_ctx = EVP_CIPHER_CTX_new();
+	if (!ctx->cipher_ctx) {
+		free(ctx);
+		return NULL;
+	}
+
+	memcpy(ctx->key, key, AES_BLOCK_SIZE);
+	ctx->is_writer = 1;
+
+	/* Generate random IV */
+	if (RAND_bytes(ctx->iv, AES_BLOCK_SIZE) != 1) {
+		EVP_CIPHER_CTX_free(ctx->cipher_ctx);
+		free(ctx);
+		return NULL;
+	}
+
+	/* Initialize cipher with IV */
+	if (EVP_EncryptInit_ex(ctx->cipher_ctx, EVP_aes_128_cfb128(), NULL, key, ctx->iv) != 1) {
+		EVP_CIPHER_CTX_free(ctx->cipher_ctx);
+		free(ctx);
+		return NULL;
+	}
+
+	return ctx;
+}
+
+struct crypto_ctx *crypto_ctx_new_reader(const uint8_t *key)
+{
+	struct crypto_ctx *ctx = calloc(1, sizeof(struct crypto_ctx));
+	if (!ctx) return NULL;
+
+	ctx->cipher_ctx = EVP_CIPHER_CTX_new();
+	if (!ctx->cipher_ctx) {
+		free(ctx);
+		return NULL;
+	}
+
+	memcpy(ctx->key, key, AES_BLOCK_SIZE);
+	ctx->is_writer = 0;
+
+	return ctx;
+}
+
+void crypto_ctx_free(struct crypto_ctx *ctx)
+{
+	if (!ctx) return;
+	if (ctx->cipher_ctx) EVP_CIPHER_CTX_free(ctx->cipher_ctx);
+	free(ctx);
+}
+
+int crypto_get_iv(struct crypto_ctx *ctx, uint8_t *out_iv)
+{
+	if (!ctx || !ctx->is_writer) return -1;
+	memcpy(out_iv, ctx->iv, AES_BLOCK_SIZE);
+	return 0;
+}
+
+int crypto_set_iv(struct crypto_ctx *ctx, const uint8_t *iv)
+{
+	if (!ctx || ctx->is_writer) return -1;
+
+	/* Initialize cipher with received IV */
+	if (EVP_DecryptInit_ex(ctx->cipher_ctx, EVP_aes_128_cfb128(), NULL, ctx->key, iv) != 1) {
+		debug(LOG_ERR, "AES decrypt init failed");
+		return -1;
+	}
+
+	ctx->iv_received = 1;
+	return 0;
+}
+
+int crypto_writer_iv_sent(struct crypto_ctx *ctx)
+{
+	return ctx ? ctx->iv_sent : 0;
+}
+
+void crypto_writer_set_iv_sent(struct crypto_ctx *ctx)
+{
+	if (ctx) ctx->iv_sent = 1;
+}
+
+int crypto_reader_iv_received(struct crypto_ctx *ctx)
+{
+	return ctx ? ctx->iv_received : 0;
+}
+
+void crypto_reader_set_iv_received(struct crypto_ctx *ctx)
+{
+	if (ctx) ctx->iv_received = 1;
+}
+
+int crypto_encrypt(struct crypto_ctx *ctx, uint8_t *data, size_t len)
+{
+	if (!ctx || !ctx->is_writer || !data || len == 0) return -1;
+
+	int outlen = 0;
+	if (EVP_EncryptUpdate(ctx->cipher_ctx, data, &outlen, data, len) != 1) {
+		debug(LOG_ERR, "AES encrypt failed");
+		return -1;
+	}
+	return 0;
+}
+
+int crypto_decrypt(struct crypto_ctx *ctx, uint8_t *data, size_t len)
+{
+	if (!ctx || ctx->is_writer || !data || len == 0) return -1;
+
+	int outlen = 0;
+	if (EVP_DecryptUpdate(ctx->cipher_ctx, data, &outlen, data, len) != 1) {
+		debug(LOG_ERR, "AES decrypt failed");
+		return -1;
+	}
+	return 0;
+}
+
+/* ---- Snappy compression (compatible with frp) ---- */
+
+int xfrpc_compress(const uint8_t *in, size_t in_len, uint8_t *out, size_t *out_len)
+{
+	if (!in || !out || !out_len || in_len == 0) return -1;
+
+	struct snappy_env env;
+	if (snappy_init_env(&env) != 0) {
+		debug(LOG_ERR, "snappy_init_env failed");
+		return -1;
+	}
+
+	size_t comp_len = snappy_max_compressed_length(in_len);
+	int ret = snappy_compress(&env, (const char *)in, in_len, (char *)out, &comp_len);
+	snappy_free_env(&env);
+
+	if (ret != 0) {
+		debug(LOG_ERR, "snappy compress failed: %d", ret);
+		return -1;
+	}
+	*out_len = comp_len;
+	return 0;
+}
+
+int xfrpc_decompress(const uint8_t *in, size_t in_len,
+                     uint8_t *out, size_t out_buf_size, size_t *out_len)
+{
+	if (!in || !out || !out_len || in_len == 0) return -1;
+
+	/* Get uncompressed size from snappy framing header */
+	size_t uncomp_len = 0;
+	if (!snappy_uncompressed_length((const char *)in, in_len, &uncomp_len)) {
+		debug(LOG_ERR, "snappy_uncompressed_length failed");
+		return -1;
+	}
+
+	if (uncomp_len > out_buf_size) {
+		debug(LOG_ERR, "snappy decompress buffer too small: need %zu, have %zu",
+		      uncomp_len, out_buf_size);
+		return -1;
+	}
+
+	int ret = snappy_uncompress((const char *)in, in_len, (char *)out);
+	if (ret != 0) {
+		debug(LOG_ERR, "snappy decompress failed: %d", ret);
+		return -1;
+	}
+	*out_len = uncomp_len;
+	return 0;
+}

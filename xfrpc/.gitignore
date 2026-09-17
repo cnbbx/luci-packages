@@ -1,0 +1,55 @@
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Debug files
+*.dSYM/
+*.su
+
+# Cmake middle files
+CMakeFiles/
+CMakeCache.txt
+Makefile
+cmake_install.cmake
+install_manifest.txt
+
+# bin generated
+xfrpc
+xfrp_test_server
+bin
+.vscode
+build
+test/iod_client
+test/iod_server
+test_iod_proto
+scripts/package_xfrpc_to_openwrt_dl.sh
+
+# Debug/test artifacts
+sslkeylog.log
+test-quic-env/

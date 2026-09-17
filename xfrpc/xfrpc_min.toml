@@ -1,0 +1,16 @@
+# xfrpc minimal TOML configuration example
+serverAddr = "0.0.0.0"
+serverPort = 7000
+# transport.wireProtocol = "v2"   # requires frps >= 0.69; default is v1
+
+auth.method = "token"
+auth.token = "12345678"
+
+transport.tls.enable = true
+
+[[proxies]]
+name = "ssh"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 22
+remotePort = 6001
